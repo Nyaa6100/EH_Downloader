@@ -6,6 +6,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 import time
 import os
 import requests
+import shutil
 
 # ====================
 # Fungsi-fungsi utama
@@ -49,6 +50,9 @@ def download_image_safe(url, file_path, retries=3, delay=2):
     return False
 
 def download_images_from_gallery(driver, gallery_url, total_pages, folder_prefix="downloaded"):
+    folder_name = f"downloads/{folder_prefix}"
+    os.makedirs(folder_name, exist_ok=True)
+
     try:
         driver.get(gallery_url)
         time.sleep(2)
@@ -57,32 +61,38 @@ def download_images_from_gallery(driver, gallery_url, total_pages, folder_prefix
         first_img.click()
         time.sleep(2)
 
-        folder_name = f"downloads/{folder_prefix}"
-        os.makedirs(folder_name, exist_ok=True)
-
+        progress = st.progress(0)
         for img_index in range(total_pages):
             try:
                 image = driver.find_element(By.CSS_SELECTOR, '#img')
                 image_url = image.get_attribute('src')
-                file_name = os.path.join(folder_name, f"{folder_prefix}_{img_index}.jpg")
+                file_name = os.path.join(folder_name, f"{folder_prefix}_{img_index+1}.jpg")
 
-                st.write(f"Downloading image {img_index + 1}: {image_url}")
+                st.write(f"📥 Mengunduh gambar {img_index + 1}: {image_url}")
                 success = download_image_safe(image_url, file_name)
 
                 if success:
-                    st.success(f"Saved as {file_name}")
+                    st.success(f"✅ Disimpan: {file_name}")
                 else:
-                    st.error(f"Failed to download image {img_index + 1}, skipping...")
+                    st.error(f"❌ Gagal unduh gambar {img_index + 1}, dilewati...")
+
+                progress.progress((img_index + 1) / total_pages)
 
                 next_button = driver.find_element(By.ID, 'next')
                 next_button.click()
                 time.sleep(2)
             except Exception as e:
-                st.error(f"Error at image {img_index + 1}: {e}")
+                st.error(f"⚠️ Error saat mengunduh gambar ke-{img_index + 1}: {e}")
                 continue
     finally:
         driver.quit()
-        st.info("Scraping finished.")
+        st.info("📦 Proses scraping selesai.")
+        return folder_name
+
+def zip_download_folder(folder_path):
+    zip_filename = f"{folder_path}.zip"
+    shutil.make_archive(folder_path, 'zip', folder_path)
+    return zip_filename
 
 # ========================
 # STREAMLIT APP START HERE
@@ -92,34 +102,14 @@ st.title("📸 E-Hentai Downloader")
 gallery_url = st.text_input("Masukkan URL Galeri", placeholder="https://e-hentai.org/g/...")
 folder_prefix = st.text_input("Nama Folder Simpan", value="downloaded_gallery")
 
-# Tombol Cek halaman (opsional untuk debugging)
-#if st.button("Cek halaman"):
-    #if not gallery_url.strip():
-        #st.warning("Silakan masukkan URL galeri terlebih dahulu.")
-    #else:
-        #driver = web_driver()
-        #try:
-            #driver.get(gallery_url)
-            #wait = WebDriverWait(driver, 10)
-            #pages = wait.until(EC.visibility_of_element_located((By.XPATH, "//*[@id='gdd']/table/tbody/tr[6]/td[2]")))
-            #full_text = pages.text
-            #page_number = extract_page_number(full_text)
-
-            #st.success("Data berhasil diambil!")
-            #st.write("Isi elemen:", full_text)
-            #st.write("Jumlah halaman (angka):", page_number)
-        #except Exception as e:
-            #st.error(f"Gagal mengambil data: {e}")
-        #finally:
-            #driver.quit()
-
-# Tombol Download (otomatis hitung jumlah halaman)
 if st.button("Download"):
     if not gallery_url.strip():
-        st.warning("Silakan masukkan URL galeri terlebih dahulu.")
+        st.warning("⚠️ Silakan masukkan URL galeri terlebih dahulu.")
     else:
-        st.info("Mengambil jumlah halaman...")
+        st.info("🔍 Mengambil jumlah halaman...")
         driver = web_driver()
+        folder_path = None  # untuk zip
+
         try:
             driver.get(gallery_url)
             wait = WebDriverWait(driver, 10)
@@ -128,11 +118,18 @@ if st.button("Download"):
             total_pages = extract_page_number(full_text)
 
             if total_pages > 0:
-                st.success(f"Jumlah halaman: {total_pages}")
-                st.info("Memulai proses scraping...")
-                download_images_from_gallery(driver, gallery_url.strip(), total_pages, folder_prefix)
+                st.success(f"📖 Jumlah halaman terdeteksi: {total_pages}")
+                st.info("🚀 Memulai proses scraping...")
+                folder_path = download_images_from_gallery(driver, gallery_url.strip(), total_pages, folder_prefix)
             else:
-                st.error("Gagal mendeteksi jumlah halaman.")
+                st.error("❌ Gagal mendeteksi jumlah halaman.")
         except Exception as e:
-            st.error(f"Terjadi kesalahan saat mengambil jumlah halaman: {e}")
+            st.error(f"❌ Terjadi kesalahan saat mengambil jumlah halaman: {e}")
+        finally:
             driver.quit()
+
+        # Jika scraping sukses, siapkan file zip untuk diunduh
+        if folder_path and os.path.exists(folder_path):
+            zip_path = zip_download_folder(folder_path)
+            st.success("✅ Siap untuk diunduh ke perangkatmu!")
+            st.download_button("⬇️ Download ZIP", open(zip_path, "rb"), file_name=f"{folder_prefix}.zip")
